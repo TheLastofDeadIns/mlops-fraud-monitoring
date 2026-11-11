@@ -1,0 +1,163 @@
+apiVersion: 1
+
+# Правила алертов на метриках сервиса скоринга. Grafana загружает их при старте,
+# они видны в Alerting -> Alert rules, папка Fraud alerts.
+# Доставка во внешние каналы не настроена: состояние смотрится в самой Grafana.
+groups:
+  - orgId: 1
+    name: scoring
+    folder: Fraud alerts
+    interval: 10s
+    rules:
+      - uid: fraud-share-high
+        title: Доля фрода выше 12%
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: fraud-prometheus
+            model:
+              refId: A
+              expr: max(scorer_fraud_share)
+              instant: true
+              range: false
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              settings:
+                mode: dropNN
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params:
+                      - 0.12
+        noDataState: OK
+        execErrState: Error
+        for: 30s
+        annotations:
+          summary: Среди последних 500 транзакций больше 12% помечены как фрод
+          description: >-
+            В обычном потоке модель помечает от долей процента до 6% транзакций.
+            Резкий рост доли означает атаку или сломанную модель.
+            Проверка: docker compose --profile attack up -d fraud_attack
+          __dashboardUid__: fraud-scoring
+          __panelId__: "7"
+        labels:
+          severity: critical
+          service: scoring
+
+      - uid: stream-stopped
+        title: Поток транзакций остановился
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: fraud-prometheus
+            model:
+              refId: A
+              expr: sum(rate(scorer_transactions_total[30s])) or vector(0)
+              instant: true
+              range: false
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              settings:
+                mode: dropNN
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params:
+                      - 1
+        noDataState: Alerting
+        execErrState: Error
+        for: 1m
+        annotations:
+          summary: Скоринг обрабатывает меньше 1 транзакции в секунду
+          description: >-
+            Симулятор шлёт около 10 транзакций в секунду. Если скорость упала ниже 1,
+            остановился продюсер, Kafka или сам скоринг.
+            Проверка: docker compose stop transaction_simulator
+          __dashboardUid__: fraud-scoring
+          __panelId__: "6"
+        labels:
+          severity: critical
+          service: scoring
+
+      - uid: event-lag-high
+        title: Скоринг отстаёт от потока больше чем на 5 секунд
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: fraud-prometheus
+            model:
+              refId: A
+              expr: histogram_quantile(0.95, sum by (le) (rate(scorer_event_lag_seconds_bucket[1m])))
+              instant: true
+              range: false
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              settings:
+                mode: dropNN
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params:
+                      - 5
+        noDataState: OK
+        execErrState: Error
+        for: 20s
+        annotations:
+          summary: 95-й перцентиль задержки от Kafka до скора за минуту больше 5 секунд
+          description: >-
+            Обычно скор готов через десятки миллисекунд после записи транзакции в Kafka.
+            Рост задержки значит, что скоринг не успевает за потоком и копит очередь.
+            Проверка: docker compose pause fraud_detector, через минуту docker compose unpause fraud_detector
+          __dashboardUid__: fraud-scoring
+          __panelId__: "13"
+        labels:
+          severity: warning
+          service: scoring

@@ -1,0 +1,28 @@
+# Recording rules: заранее посчитанные ряды для дашбордов и алертов.
+# Имена по схеме уровень:метрика:операция из рекомендаций Prometheus.
+groups:
+  - name: scoring
+    interval: 5s
+    rules:
+      - record: job:scorer_transactions:rate30s
+        expr: sum by (job) (rate(scorer_transactions_total[30s]))
+
+      - record: job:scorer_flagged_share:rate1m
+        expr: |
+          sum by (job) (rate(scorer_flagged_total[1m]))
+            / sum by (job) (rate(scorer_transactions_total[1m]))
+
+      - record: job:scorer_processing_seconds:p95_1m
+        expr: histogram_quantile(0.95, sum by (job, le) (rate(scorer_processing_seconds_bucket[1m])))
+
+      - record: job:scorer_event_lag_seconds:p95_1m
+        expr: histogram_quantile(0.95, sum by (job, le) (rate(scorer_event_lag_seconds_bucket[1m])))
+
+  - name: writer
+    interval: 5s
+    rules:
+      - record: job:writer_scores_written:rate30s
+        expr: sum by (job) (rate(writer_scores_written_total[30s]))
+
+      - record: job:writer_db_write_seconds:p95_1m
+        expr: histogram_quantile(0.95, sum by (job, le) (rate(writer_db_write_seconds_bucket[1m])))

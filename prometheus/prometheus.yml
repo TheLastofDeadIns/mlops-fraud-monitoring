@@ -1,0 +1,38 @@
+global:
+  # Короткий интервал, чтобы графики в Grafana обновлялись почти сразу
+  scrape_interval: 1s
+  scrape_timeout: 1s
+  evaluation_interval: 5s
+  external_labels:
+    project: fraud-monitoring
+
+rule_files:
+  - /etc/prometheus/rules.yml
+
+scrape_configs:
+  # Онлайн-скоринг: метрики scorer_*
+  - job_name: fraud_detector
+    static_configs:
+      - targets: ['fraud_detector:8000']
+        labels:
+          service: scoring
+
+  # Запись скоров в PostgreSQL: метрики writer_*
+  - job_name: scoring_writer
+    static_configs:
+      - targets: ['scoring_writer:8001']
+        labels:
+          service: writer
+
+  # Системные метрики хоста контейнеров: node_*
+  - job_name: node_exporter
+    static_configs:
+      - targets: ['node-exporter:9100']
+        labels:
+          service: host
+
+  - job_name: prometheus
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    static_configs:
+      - targets: ['localhost:9090']
